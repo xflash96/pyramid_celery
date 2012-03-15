@@ -2,8 +2,8 @@
 import os
 import sys
 from celery.bin.celeryd import WorkerCommand
-from pyramid.paster import bootstrap
-from pyramid_celery import Celery
+from pyramid.paster import get_appsettings
+from pyramid_celery import celery, config_cellery
 
 def usage(argv):# pragma: no cover 
     cmd = os.path.basename(argv[0])
@@ -17,8 +17,9 @@ def main(argv=sys.argv): # pragma: no cover
 
     config_uri = argv[1]
 
-    env = bootstrap(config_uri)
-    worker = WorkerCommand(app=Celery(env))
+    settings = get_appsettings(config_uri)
+    config_cellery(settings)
+    worker = WorkerCommand(app=celery)
     worker.run()
 
 if __name__ == "__main__": # pragma: no cover
