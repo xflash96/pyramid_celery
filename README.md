@@ -11,6 +11,8 @@ or by calling config.include('pyramid_celery').
 
 ``` python
     pyramid.includes = pyramid_celery
+    mongodb.uri = mongodb://localhost:1234
+    celery.dbname = celery
 ```
 This will register all the functions decerotated with @task.
 
