@@ -1,31 +1,85 @@
-from celery import Celery as C
+from celery import Celery as _Celery
 from pymongo import uri_parser
+from pyramid.path import caller_package
+import venusian
+import pkgutil
 
 celery = None
-Task = None
+_modules_to_register = set()
+_celery_routes = {}
 
-def config_cellery(settings):
+
+class Task(object):
+    queue = 'celery'
+    venusian = venusian
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+    def __call__(self, wrapped):
+        def callback(scanner, name, ob):
+            global celery
+            task = celery.task(self.wrapped, *self.args, **self.kwargs)
+            setattr(info.module, name, task)
+
+        self.wrapped = wrapped
+        global _modules_to_register
+        global _celery_routes
+        wrapped_mod = wrapped.__module__
+        wrapped_name = wrapped.__name__
+        _modules_to_register.add(wrapped_mod)
+        name = self.kwargs.get('name')
+        if name is None:
+            name = '.'.join([wrapped_mod,wrapped_name])
+        _celery_routes[name] = \
+                {'queue': self.queue}
+        info = self.venusian.attach(wrapped, callback, category='pyramid_celery')
+        return wrapped
+
+task = Task
+
+def scan(scope=None):
+    scanner = venusian.Scanner()
+    if scope is None:
+        scope = caller_package()
+    scanner.scan(scope, categories=('pyramid_celery',))
+
+def touch_all_package(package):
+    path = package.__path__
+    for loader, module_name, is_pkg in  pkgutil.walk_packages(path):
+        print module_name
+        loader.find_module(module_name).load_module(module_name)
+        exec('import %s' % module_name)
+            
+def config_celery(settings, package=None):
+    if package is None:
+        package = caller_package()
+    touch_all_package(package)
     obj_config = config_celery_for_mongo(settings)
     global celery
-    celery = C()
+    celery = _Celery()
     celery.config_from_object(obj_config)
-    global Task
-    Task = celery.create_task_cls()
+    print celery.backend
+    print obj_config
+
 
 def includeme(config):
-    config_cellery(config.registry.settings)
+    config_celery(config.registry.settings)
 
 def config_celery_for_mongo(settings):
     db_uri = settings['mongodb.uri'].strip('"\'')
     db_name = settings['celery.dbname'].strip('"\'')
     res = uri_parser.parse_uri(db_uri)
     host, port = res['nodelist'][0]
-    modules_to_register = eval(settings['celery.import'])
+    global _modules_to_register
+    global _celery_routes
+    print 'collected tasks'
+    print _celery_routes.keys()
 
     celery_config = {
         'CELERY_RESULT_BACKEND' : 'mongodb',
         'BROKER_TRANSPORT'      : 'mongodb',
-        'CELERY_IMPORTS': tuple(modules_to_register),
+        'CELERY_IMPORTS': tuple(_modules_to_register),
         'BROKER_HOST'   : host,
         'BROKER_PORT'   : port,
         'BROKER_VHOST'  : db_name,
@@ -33,7 +87,9 @@ def config_celery_for_mongo(settings):
             'host': host,
             'port': port,
             'database': db_name
-        }
+        },
+        'CELERY_DISABLE_RATE_LIMITS': True,
+        'CELERY_ROUTES': _celery_routes,
+        'CELERYD_POOL': 'gevent',
     }
-    print celery_config
     return celery_config
