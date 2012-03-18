@@ -30,6 +30,7 @@ def add(self, x, y):
 ```
 
 to define route of a task, do
+
 ``` python
 from pyramid_celery import Task
 class RemoteTask(Task):
